@@ -1,0 +1,31 @@
+title: Vidar - resolucion de C2 via dead-drop en servicios legitimos
+id: 320d6ded-0f0f-405f-bf03-6aa11cc3d656
+status: experimental
+description: Detecta la consulta concurrente y en breve sucesion a los perfiles de servicios legitimos usados como dead-drop por la muestra de Vidar (Telegram, Epic Games, Steam). La deteccion se basa en el patron, no en bloquear estos servicios. Requiere correlacion temporal en el SIEM.
+author: J. A. Beltre Castro
+date: 2026/08/22
+references:
+    - TFM STEALERLAB
+    - https://www.esentire.com/blog/esentire-threat-intelligence-malware-analysis-vidar-stealer
+tags:
+    - attack.command_and_control
+    - attack.t1102
+logsource:
+    category: dns_query
+    product: windows
+detection:
+    selection_deaddrop:
+        QueryName|contains:
+            - 'telegram.me'
+            - 'dev.epicgames.com'
+            - 'steamcommunity.com'
+    filter_browser:
+        Image|endswith:
+            - '\chrome.exe'
+            - '\firefox.exe'
+            - '\msedge.exe'
+            - '\brave.exe'
+    condition: selection_deaddrop and not filter_browser
+falsepositives:
+    - Aplicaciones legitimas no-navegador que consulten estos dominios. Correlacionar con proceso de origen.
+level: medium

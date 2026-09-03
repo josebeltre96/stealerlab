@@ -1,0 +1,28 @@
+title: Raccoon - AppCrash de binario ejecutado desde ruta de usuario
+id: 3f2a803d-7fe6-400d-a459-00cd0c87b541
+status: experimental
+description: Detecta un reporte de error de aplicacion (WER/AppCrash) generado en la cola de reportes, excluyendo procesos legitimos habituales. Observado con la muestra obsoleta de Raccoon que no completo ejecucion. Heuristica de baja confianza.
+author: J. A. Beltre Castro
+date: 2026/08/22
+references:
+    - TFM STEALERLAB
+tags:
+    - attack.execution
+    - attack.defense_evasion
+    - attack.t1036
+logsource:
+    category: file_event
+    product: windows
+detection:
+    selection_wer:
+        TargetFilename|contains: '\Microsoft\Windows\WER\ReportQueue\AppCrash_'
+    filter_system:
+        TargetFilename|contains:
+            - 'AppCrash_svchost'
+            - 'AppCrash_explorer'
+            - 'AppCrash_RuntimeBroker'
+            - 'AppCrash_msedge'
+    condition: selection_wer and not filter_system
+falsepositives:
+    - Aplicaciones legitimas inestables. Correlacionar con ejecucion desde Downloads/Temp/Desktop.
+level: low

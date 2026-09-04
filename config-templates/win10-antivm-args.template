@@ -1,0 +1,6 @@
+# VM120 victima - argumentos anti-anti-VM en /etc/pve/qemu-server/120.conf
+# Enmascaran la virtualizacion (SMBIOS de un Dell fisico, disco ATA)
+args: -smbios type=0,vendor=Dell,version=1.21.0,date=07/15/2021 -smbios type=1,manufacturer=Dell,product=OptiPlex7070,version=1.0,serial=<SERIAL>,uuid=<UUID>,family=OptiPlex -smbios type=2,manufacturer=Dell,product=0K240Y,version=A01 -smbios type=3,manufacturer=Dell,version=1.0,serial=<SERIAL> -global scsi-hd.vendor=ATA -global scsi-hd.product=ST1000DM010-2EP1
+cpu: host,hidden=1,flags=+aes
+net0: e1000=<MAC>,bridge=vmbr2
+ostype: other

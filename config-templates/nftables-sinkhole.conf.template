@@ -1,0 +1,9 @@
+# Sinkhole - /etc/nftables.conf (plantilla)
+table ip nat {
+    chain prerouting {
+        type nat hook prerouting priority dstnat; policy accept;
+        iifname "ens18" ip daddr 10.10.99.0/24 drop
+        iifname "ens18" tcp dport { 80, 443 } redirect to :8080
+        iifname "ens18" ip daddr != 10.10.66.2 dnat to 10.10.66.2
+    }
+}

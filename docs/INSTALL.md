@@ -1,46 +1,59 @@
 # Guía de despliegue — STEALERLAB
 
-Esta guía describe el despliegue del laboratorio desde cero. Requiere conocimientos de virtualización y administración de redes.
+Montaje del laboratorio desde cero. Valores de red del laboratorio de referencia; ajústalos a tu entorno.
+
+> Este laboratorio ejecuta malware real. No lo despliegues en producción ni en hardware con datos sensibles.
+
+## 0. Arquitectura y red
+- vmbr1 10.10.20.0/24 (NAT/internet, solo REMnux) · vmbr2 10.10.66.0/24 (análisis, **host SIN IP**) · vmbr3 10.10.99.0/24 (gestión)
+- VM100 sinkhole (ens18 .66.2, ens19 .99.2) · VM110 REMnux (ens18 .20.10, cap0 sin IP) · VM120 víctima (.66.10)
 
 ## 1. Host Proxmox
-
-- Instalar Proxmox VE 9.x sobre el servidor físico.
-- Configurar los puentes de red (bridges):
-  - `vmbr1` → 10.10.20.1/24 (NAT, salida a internet controlada)
-  - `vmbr2` → segmento de análisis, **SIN IP en el host** (control de aislamiento primario)
-  - `vmbr3` → 10.10.99.1/24 (gestión)
-- Aplicar la política de descarte de reenvío para `vmbr2` (ver `config-templates/nftables.conf.template`).
-
-## 2. VM100 — Sinkhole
-
-- Base Debian/Ubuntu.
-- Dos interfaces: `ens18` en vmbr2 (10.10.66.2) y `ens19` en vmbr3 (10.10.99.2).
-- Instalar INetSim, mitmproxy y nftables.
-- Aplicar las plantillas de `config-templates/` (rellenando tus valores).
-- El sinkhole actúa como gateway y DNS de la víctima, e intercepta el tráfico TLS.
-
-## 3. VM110 — REMnux
-
-- Desplegar REMnux (https://remnux.org).
-- `ens18` en vmbr1 (10.10.20.10) para actualizaciones y consulta de repositorios.
-- `cap0` en vmbr2 en modo pasivo (captura), sin IP.
-- Nota: para capturar tráfico de la víctima en el bridge, configurar port mirroring o un tap, ya que un bridge Linux no reenvía por defecto el tráfico unicast entre puertos a una interfaz de escucha.
-
-## 4. VM120 — Víctima
-
-- Windows 10 Pro x64 (documentar build exacto).
-- Instalar Sysmon con la configuración de SwiftOnSecurity.
-- Instalar el agente QEMU (qemu-guest-agent).
-- Interfaz única en vmbr2 (10.10.66.10), gateway y DNS = 10.10.66.2.
-- Activar la clave de registro RealTimeIsUniversal para operar en UTC.
-- Crear una instantánea limpia («golden») tras la preparación.
-
-## 5. Verificación
-
-Antes de operar, ejecutar en el host:
-
-```bash
-./scripts/verificar-aislamiento.sh
+- Proxmox VE 9.x. Bridges según arriba; **vmbr2 sin IP** (`iface vmbr2 inet manual`).
+- MASQUERADE de vmbr1 sobre la NIC física (ej. enp1s0f0).
+- Servicio de aislamiento (FORWARD DROP sobre vmbr2):
+```
+iptables -I FORWARD -i vmbr2 -j DROP
+iptables -I FORWARD -o vmbr2 -j DROP
 ```
 
-Todos los controles deben pasar (host sin IP ni ruta a vmbr2, ping al segmento falla, agente QEMU responde).
+## 2. VM100 Sinkhole
+- Debian/Ubuntu. INetSim + mitmproxy + nftables (ver config-templates/).
+- Usuario `lab` con SSH por clave (el host extrae mitmdump.log por vmbr3).
+- **La captura de tráfico se hace aquí** (ens18), no en cap0 — el bridge no entrega unicast a cap0.
+
+## 3. VM110 REMnux
+- REMnux. ens18 en vmbr1 (internet), cap0 en vmbr2 sin IP.
+- `ip_forward=0` (evitar fuga por multihoming).
+- Zeek, 7-Zip. /opt/lab/reports/ y /opt/lab/muestras-cifradas/.
+
+## 4. VM120 Víctima (Windows 10)
+- Windows 10 Pro x64 build 19045.6456. Interfaz en vmbr2 (.66.10, gw/DNS .66.2).
+- Agente QEMU (qemu-guest-agent) — imprescindible.
+- Sysmon 15.21 (config SwiftOnSecurity). RealTimeIsUniversal=1 (UTC).
+- Instalar CA de mitmproxy en el almacén de confianza.
+- Defender OFF. Anti-anti-VM: ver config-templates/win10-antivm-args.template.
+- Crear snapshot `golden-detonacion` con la VM apagada.
+
+## 5. Scripts
+```bash
+git clone <repo> /root/stealerlab-final
+chmod +x /root/stealerlab-final/scripts/*.sh
+cp config-templates/env.template /opt/lab/.env   # rellenar MB_AUTH_KEY
+```
+Rutas en los scripts: STAGE_HOST=/root/stealerlab-final/stage, EXTRACTOR y CAPSCRIPT en scripts/.
+
+## 6. Verificar y operar
+```bash
+./scripts/verificar-aislamiento.sh    # [PASS] obligatorio
+./scripts/preparar.sh <sha256> <familia>
+# detonar en VNC, observar 15 min
+./scripts/recoger.sh
+./scripts/triaje.sh
+```
+
+## Lecciones de la validación (detonación real LummaC2)
+- Aislamiento verificado con test víctima→gestión (PASS).
+- EVTX extraído correctamente por agente QEMU con PowerShell (un EVTX de 66 MB tarda por el troceado).
+- C2 grzpoint.cyou capturado; evidencia de red vía mitmdump.log del sinkhole.
+- Captura PCAP: en el sinkhole (ens18); requiere sudoers NOPASSWD para lanzamiento desatendido.

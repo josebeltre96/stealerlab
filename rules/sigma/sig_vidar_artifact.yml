@@ -1,11 +1,10 @@
 title: Vidar - artefacto de dependencias en ProgramData
 id: bb61fded-186b-4b60-976a-a0acb49486d2
 status: experimental
-description: Detecta la creacion de la carpeta de trabajo con dependencias descifradas en C:\ProgramData, comportamiento documentado de Vidar desde la version 3.6. Heuristica de familia.
+description: Detecta la creacion de DLL en ProgramData por proceso no confiable, comportamiento de Vidar.
 author: J. A. Beltre Castro
 date: 2026/08/22
 references:
-    - TFM STEALERLAB
     - https://www.esentire.com/blog/esentire-threat-intelligence-malware-analysis-vidar-stealer
 tags:
     - attack.defense_evasion
@@ -16,8 +15,7 @@ logsource:
 detection:
     selection:
         TargetFilename|startswith: 'C:\ProgramData\'
-        TargetFilename|endswith:
-            - '.dll'
+        TargetFilename|endswith: '.dll'
     filter_legit:
         Image|startswith:
             - 'C:\Windows\'
@@ -25,5 +23,5 @@ detection:
             - 'C:\Program Files (x86)\'
     condition: selection and not filter_legit
 falsepositives:
-    - Instaladores legitimos que depositen DLL en ProgramData. Correlacionar con proceso de origen no confiable.
+    - Instaladores legitimos que depositen DLL en ProgramData.
 level: medium

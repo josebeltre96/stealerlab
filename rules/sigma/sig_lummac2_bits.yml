@@ -1,11 +1,9 @@
-title: LummaC2 - descarga por BITS con log de depuracion aria
+title: LummaC2 - descarga BITS con log aria-debug
 id: b2732d26-e128-42cd-9eca-c8d063809e48
 status: experimental
-description: Detecta la combinacion de descarga BITS y el log aria-debug observada en la muestra de LummaC2. Heuristica de comportamiento.
+description: Detecta el log aria-debug observado en la muestra de LummaC2.
 author: J. A. Beltre Castro
 date: 2026/08/22
-references:
-    - TFM STEALERLAB
 tags:
     - attack.command_and_control
     - attack.t1105
@@ -17,5 +15,5 @@ detection:
         TargetFilename|contains: 'aria-debug'
     condition: selection_aria
 falsepositives:
-    - Uso legitimo de aria2. Correlacionar con el resto de la cadena de LummaC2.
+    - Uso legitimo de aria2.
 level: medium

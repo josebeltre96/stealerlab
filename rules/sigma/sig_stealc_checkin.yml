@@ -1,11 +1,10 @@
 title: StealC - check-in a dominio typosquat de svchost
 id: f8a74aca-4009-4346-829a-f0c900d31e2b
 status: experimental
-description: Detecta la resolucion DNS de un dominio que imita a svchost (typosquat), observado en la muestra de StealC analizada en STEALERLAB. Heuristica de familia.
+description: Detecta la resolucion DNS de un dominio typosquat de svchost, observado en la muestra de StealC.
 author: J. A. Beltre Castro
 date: 2026/08/22
 references:
-    - TFM STEALERLAB
     - https://blog.sekoia.io/stealc-a-copycat-of-vidar-and-raccoon-infostealers-gaining-in-popularity-part-1/
 tags:
     - attack.command_and_control
@@ -22,5 +21,5 @@ detection:
             - 'svhost'
     condition: selection
 falsepositives:
-    - Improbable; ningun servicio legitimo usa el typosquat 'svhost'. Ajustar al dominio exacto en produccion.
+    - Improbable; ningun servicio legitimo usa el typosquat 'svhost'.
 level: high

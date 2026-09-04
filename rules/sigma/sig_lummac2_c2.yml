@@ -1,11 +1,10 @@
-title: LummaC2 - consulta a C2 en TLD de bajo coste
+title: LummaC2 - consulta al dominio C2 exacto
 id: 678832b1-85ed-4cf3-aad5-778800b5b795
 status: experimental
-description: Detecta la consulta DNS al dominio C2 exacto observado en la muestra de LummaC2 (grzpoint.cyou). El uso de TLD .cyou es un indicador debil por si solo, por lo que la regla apunta al dominio concreto y deja el TLD como contexto.
+description: Detecta la consulta DNS al dominio C2 exacto observado (grzpoint.cyou). El TLD .cyou por si solo es indicador debil; la regla apunta al dominio concreto.
 author: J. A. Beltre Castro
 date: 2026/08/22
 references:
-    - TFM STEALERLAB
     - https://www.cisa.gov/news-events/cybersecurity-advisories/aa25-141b
 tags:
     - attack.command_and_control
@@ -18,5 +17,5 @@ detection:
         QueryName: 'grzpoint.cyou'
     condition: selection_exact
 falsepositives:
-    - Ninguno para el dominio exacto. NOTA: no se recomienda alertar solo por el TLD .cyou (alto ruido).
+    - Ninguno para el dominio exacto. No alertar solo por el TLD .cyou (alto ruido).
 level: high

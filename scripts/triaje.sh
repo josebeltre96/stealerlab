@@ -7,7 +7,7 @@
 # Uso:  ./triaje.sh
 # Salida: /opt/lab/reports/_triaje/  (CSVs + resumen)
 # ============================================================
-set -u
+set -euo pipefail
 REPORTS="/opt/lab/reports"
 OUT="${REPORTS}/_triaje"
 mkdir -p "$OUT"
@@ -83,7 +83,7 @@ for dir in "${REPORTS}"/*/; do
   fam=$(echo "$caso" | cut -d_ -f1)
   if [ -f "${dir}sysmon_resumen.txt" ]; then
     # Ficheros en ProgramData, Temp, AppData, Prefetch creados (Id11)
-    grep 'Id11' "${dir}sysmon_resumen.txt" 2>/dev/null \
+    grep -F '[Id11] ' "${dir}sysmon_resumen.txt" 2>/dev/null \
       | grep -oE 'TargetFilename: [^|]+' | sed 's/TargetFilename: //' \
       | grep -iE 'ProgramData|\\Temp\\|AppData|Prefetch|muestra|\.lnk' \
       | grep -viE 'Edge|Chrome\\User|WER\\Report|SystemTemp\\__PS|LOG|\.tmp$' \
@@ -111,7 +111,8 @@ for dir in "${REPORTS}"/*/; do
   [ "$caso" == "_triaje" ] && continue
   fam=$(echo "$caso" | cut -d_ -f1)
   if [ -f "${dir}sysmon_resumen.txt" ]; then
-    grep 'Id1' "${dir}sysmon_resumen.txt" 2>/dev/null \
+    # CORRECCION (bug Id1/Id11): patron exacto '[Id1] ' para no capturar Id11, Id12, etc.
+    grep -F '[Id1] ' "${dir}sysmon_resumen.txt" 2>/dev/null \
       | grep -iE 'muestra|ProgramData|\\Temp\\' \
       | grep -oE 'Image: [^|]+' | sed 's/Image: //' | tr -d '\r' \
       | sort -u \

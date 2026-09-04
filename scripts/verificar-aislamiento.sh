@@ -12,13 +12,16 @@
 # --- Parametros del laboratorio (ajustar si cambia el direccionamiento) ---
 SINKHOLE_IP="10.10.66.2"     # sinkhole en el segmento de analisis
 VICTIMA_IP="10.10.66.10"     # victima en el segmento de analisis
+MGMT_IP="10.10.99.1"         # gateway de gestion (vmbr3)
+VMID_VICTIM="120"
+FALLOS=0
 SEG_ANALISIS="10.10.66.0/24"
 VMID_SINKHOLE="100"          # VM100 = sinkhole (para prueba de agente QEMU)
 
 # --- Colores ---
 V='\033[0;32m'; R='\033[0;31m'; A='\033[1;34m'; N='\033[0m'; B='\033[1m'
 ok(){   echo -e "  [${V}OK${N}]   $1"; }
-fail(){ echo -e "  [${R}FALLO${N}] $1"; }
+fail(){ echo -e "  [${R}FALLO${N}] $1"; FALLOS=$((FALLOS+1)); }
 info(){ echo -e "  [${A}INFO${N}] $1"; }
 
 echo -e "${B}===============================================================${N}"
@@ -87,8 +90,34 @@ else
   ip -br link show type bridge 2>/dev/null | sed 's/^/  /'
 fi
 
+#-------------------------------------------------------------------------------
+echo -e "\n${A}[7] Prueba CRITICA: victima -> gestion (debe FALLAR)${N}"
+# Este es el camino que provoco el cuasi-incidente (seccion 5.7): la victima
+# NO debe alcanzar el segmento de gestion. Se lanza desde DENTRO de la victima.
+#-------------------------------------------------------------------------------
+RES=$(qm guest exec "$VMID_VICTIM" -- powershell.exe -Command \
+  "(Test-Connection -ComputerName $MGMT_IP -Count 2 -Quiet)" 2>/dev/null \
+  | python3 -c "import sys,json;print(json.load(sys.stdin).get('out-data','').strip())" 2>/dev/null || echo "error")
+if echo "$RES" | grep -qi "true"; then
+  fail "La victima ALCANZA la gestion ($MGMT_IP) -- FUGA DE AISLAMIENTO CRITICA"
+else
+  ok "La victima NO alcanza la gestion ($MGMT_IP) -- aislamiento correcto"
+fi
+
 echo -e "\n${B}===============================================================${N}"
 echo -e "${B} Resumen: el segmento de analisis es inalcanzable por red desde${N}"
 echo -e "${B} el host, pero la VM sigue siendo gestionable por el agente QEMU.${N}"
 echo -e "${B} Esta es la evidencia central del aislamiento (Cap. 5.2 y 5.7).${N}"
 echo -e "${B}===============================================================${N}"
+
+#-------------------------------------------------------------------------------
+# Resultado global (aserciones PASS/FAIL, bug #43)
+#-------------------------------------------------------------------------------
+echo ""
+if [ "$FALLOS" -eq 0 ]; then
+  echo -e "${V}[PASS] Todos los controles de aislamiento superados.${N}"
+  exit 0
+else
+  echo -e "${R}[FAIL] $FALLOS control(es) de aislamiento fallaron. NO detonar.${N}"
+  exit 1
+fi

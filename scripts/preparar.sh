@@ -5,15 +5,15 @@
 #     [3b] ya solo sincroniza el sinkhole (la victima queda bien sola).
 # Uso:  ./preparar.sh <sha256> <familia>
 # ============================================================
-set -u
+set -euo pipefail
 VICTIM=120; REMNUX=110; SINK=100
 GOLDEN="golden-detonacion"
 REMNUX_IP="10.10.20.10"
 SINK_MGMT_IP="10.10.99.2"
 REMNUX_CAP_IF="cap0"
 SAMPLES_REMOTE="/opt/lab/muestras-cifradas"
-STAGE_HOST="/root/lab/stage"
-CAPSCRIPT="/opt/lab/scripts/captura.sh"
+STAGE_HOST="/root/stealerlab-final/stage"
+CAPSCRIPT="/root/stealerlab-final/scripts/captura.sh"
 ISO="/var/lib/vz/template/iso/muestra-actual.iso"
 ZIPPASS="infected"
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; CYAN='\033[0;36m'; NC='\033[0m'
@@ -48,11 +48,19 @@ done
 echo -e "${CYAN}[3b] Sincronizando reloj del sinkhole a UTC...${NC}"
 qm guest exec $SINK -- date -u -s "$(date -u '+%Y-%m-%d %H:%M:%S')" >/dev/null 2>&1
 # La victima tiene RealTimeIsUniversal=1: su hora ya es correcta, no se toca.
-VUTC=$(qm guest exec $VICTIM -- powershell.exe -Command "[DateTime]::UtcNow.ToString('HH:mm:ss')" 2>/dev/null | python3 -c "import sys,json;print(json.load(sys.stdin).get('out-data','').strip())" 2>/dev/null)
-echo -e "    ${GREEN}sinkhole sincronizado | victima UTC=${VUTC} (host UTC=$(date -u '+%H:%M:%S'))${NC}"
+# CORRECCION (bug tiempo): comparar fecha COMPLETA y calcular offset, no solo HH:mm:ss
+VUTC=$(qm guest exec $VICTIM -- powershell.exe -Command "[DateTime]::UtcNow.ToString('yyyy-MM-dd HH:mm:ss')" 2>/dev/null | python3 -c "import sys,json;print(json.load(sys.stdin).get('out-data','').strip())" 2>/dev/null)
+HOSTUTC=$(date -u '+%Y-%m-%d %H:%M:%S')
+# Calcular offset en segundos entre victima y host
+OFFSET=$(python3 -c "from datetime import datetime as d; a=d.strptime('$VUTC','%Y-%m-%d %H:%M:%S'); b=d.strptime('$HOSTUTC','%Y-%m-%d %H:%M:%S'); print(abs(int((a-b).total_seconds())))" 2>/dev/null || echo 9999)
+echo -e "    ${GREEN}victima UTC=${VUTC} | host UTC=${HOSTUTC} | offset=${OFFSET}s${NC}"
+if [ "$OFFSET" -gt 5 ]; then
+  echo -e "    ${RED}[!] AVISO: offset de reloj > 5s. La correlacion temporal puede fallar.${NC}"
+  echo -e "    ${YELLOW}Revisa la sincronizacion antes de detonar (rollback puede haber cambiado la fecha).${NC}"
+fi
 
 echo -e "${CYAN}[4/7] Iniciando captura en REMnux (${REMNUX_CAP_IF})...${NC}"
-RES=$(ssh lab@$REMNUX_IP "sudo ${CAPSCRIPT} start ${CASO} ${REMNUX_CAP_IF}")
+RES=$(${CAPSCRIPT} start ${CASO})
 echo "    $RES"
 [[ "$RES" == captura-activa* ]] && echo -e "    ${GREEN}OK${NC}" || echo -e "    ${YELLOW}[!] revisar${NC}"
 

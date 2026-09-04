@@ -1,12 +1,5 @@
-# NUNCA subir secretos
 .env
 *.env
-config-templates/*.conf
-!config-templates/*.template
-config-templates/inetsim.conf
-config-templates/nftables.conf
-
-# NUNCA subir muestras ni evidencia
 *.exe
 *.dll
 *.bin
@@ -14,20 +7,18 @@ config-templates/nftables.conf
 *.zip
 samples/
 muestras/
+muestras-cifradas/
 reports/
 evidence/
 *.pcap
 *.mitm
 *.evtx
-*.log
-
-# Claves
 *.key
 *.pem
 wg*.conf
 id_rsa*
-
-# Temporales
+mitm-ca.cer
+config-templates/*.conf
+!config-templates/*.template
 *.tmp
 *~
-.DS_Store

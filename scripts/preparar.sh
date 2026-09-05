@@ -64,10 +64,17 @@ qm rollback $VICTIM $GOLDEN && sleep 3
 echo -e "${CYAN}[3/7] Arrancando victima...${NC}"
 qm start $VICTIM
 echo -n "    esperando guest agent"
+QGA_OK=0
 for i in $(seq 1 30); do
-  if qm agent $VICTIM ping >/dev/null 2>&1; then echo -e " ${GREEN}OK${NC}"; break; fi
+  if qm agent $VICTIM ping >/dev/null 2>&1; then echo -e " ${GREEN}OK${NC}"; QGA_OK=1; break; fi
   echo -n "."; sleep 3
 done
+# CORRECCION (bloqueo 2): abortar si el agente QEMU no responde (no detonar sin QGA)
+if [ "$QGA_OK" -ne 1 ]; then
+  echo -e "\n    ${RED}[!] El agente QEMU no responde tras 30 intentos. ABORTANDO.${NC}"
+  echo -e "    ${RED}    No se puede extraer evidencia sin QGA; no se detona.${NC}"
+  exit 1
+fi
 
 echo -e "${CYAN}[3b] Sincronizando reloj del sinkhole a UTC...${NC}"
 qm guest exec $SINK -- date -u -s "$(date -u '+%Y-%m-%d %H:%M:%S')" >/dev/null 2>&1
@@ -86,7 +93,14 @@ fi
 echo -e "${CYAN}[4/7] Iniciando captura en el sinkhole (ens18)...${NC}"
 RES=$(${CAPSCRIPT} start ${CASO})
 echo "    $RES"
-[[ "$RES" == captura-activa* ]] && echo -e "    ${GREEN}OK${NC}" || echo -e "    ${YELLOW}[!] revisar${NC}"
+# CORRECCION (bloqueo 3): si la captura no arranca de forma inequivoca, ABORTAR la detonacion.
+if [[ "$RES" == *captura-activa* ]]; then
+  echo -e "    ${GREEN}OK${NC}"
+else
+  echo -e "    ${RED}[!] La captura no arranco de forma inequivoca. ABORTANDO detonacion.${NC}"
+  echo -e "    ${RED}    Revisa captura.sh / sinkhole antes de detonar. La victima NO se detona.${NC}"
+  exit 1
+fi
 
 echo -e "${CYAN}[5/7] Rotando log TLS del sinkhole...${NC}"
 ssh -o StrictHostKeyChecking=no lab@$SINK_MGMT_IP "truncate -s 0 /var/log/mitm/mitmdump.log" 2>/dev/null \

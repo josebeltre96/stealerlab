@@ -7,6 +7,7 @@
 # ============================================================
 set -euo pipefail
 PRESERVAR_SNAPSHOT=0
+SNAP_OK=0
 VICTIM=120; REMNUX=110; SINK=100
 GOLDEN="golden-detonacion"
 REMNUX_IP="10.10.20.10"
@@ -31,8 +32,16 @@ mkdir -p /root/lab/stage
 # CORRECCION (C51): crear el snapshot forense AL INICIO, antes de extraer,
 # para que exista realmente si la extraccion del EVTX falla y hay que preservarlo.
 echo -e "${CYAN}[0/8] Creando snapshot forense previo: ${SNAP}...${NC}"
-qm snapshot $VICTIM "${SNAP}" --description "Infectado: ${CASO}" 2>/dev/null \
-  && echo -e "    ${GREEN}${SNAP} creado${NC}" || echo -e "    ${YELLOW}existe/error${NC}"
+if qm snapshot $VICTIM "${SNAP}" --description "Infectado: ${CASO}" 2>/dev/null; then
+  echo -e "    ${GREEN}${SNAP} creado${NC}"
+  SNAP_OK=1
+else
+  # CORRECCION (bloqueo 1): si el snapshot NO se crea, activar preservacion y no revertir.
+  echo -e "    ${RED}[!] FALLO al crear el snapshot forense ${SNAP}.${NC}"
+  echo -e "    ${RED}    Sin snapshot valido NO se revertira la victima (proteccion de evidencia).${NC}"
+  SNAP_OK=0
+  PRESERVAR_SNAPSHOT=1
+fi
 
 # ------------------------------------------------------------
 # TELEMETRIA SYSMON  (se extrae de la VICTIMA INFECTADA VIVA, antes de revertir)
@@ -125,7 +134,7 @@ qm set $VICTIM --ide2 none,media=cdrom >/dev/null 2>&1
 qm stop $VICTIM 2>/dev/null; sleep 2
 # CORRECCION (bug perdida de evidencia): NO borrar el snapshot ni revertir si fallo la
 # extraccion de evidencia. Preserva el estado infectado para recuperacion manual.
-if [ "${PRESERVAR_SNAPSHOT:-0}" -eq 1 ]; then
+if [ "${PRESERVAR_SNAPSHOT:-0}" -eq 1 ] || [ "${SNAP_OK:-0}" -ne 1 ]; then
   echo -e "    ${RED}[!] Evidencia incompleta: se PRESERVA el snapshot forense ${SNAP}${NC}"
   echo -e "    ${RED}    La victima NO se revierte. Recupera la evidencia y revierte manualmente:${NC}"
   echo -e "    ${YELLOW}    qm delsnapshot $VICTIM \"${SNAP}\" && qm rollback $VICTIM $GOLDEN${NC}"

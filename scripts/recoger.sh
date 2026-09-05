@@ -28,6 +28,12 @@ echo -e "${CYAN}    snapshot forense: ${SNAP}${NC}"
 ssh lab@$REMNUX_IP "mkdir -p ${DIR}"
 mkdir -p /root/lab/stage
 
+# CORRECCION (C51): crear el snapshot forense AL INICIO, antes de extraer,
+# para que exista realmente si la extraccion del EVTX falla y hay que preservarlo.
+echo -e "${CYAN}[0/8] Creando snapshot forense previo: ${SNAP}...${NC}"
+qm snapshot $VICTIM "${SNAP}" --description "Infectado: ${CASO}" 2>/dev/null \
+  && echo -e "    ${GREEN}${SNAP} creado${NC}" || echo -e "    ${YELLOW}existe/error${NC}"
+
 # ------------------------------------------------------------
 # TELEMETRIA SYSMON  (se extrae de la VICTIMA INFECTADA VIVA, antes de revertir)
 # ------------------------------------------------------------
@@ -63,7 +69,7 @@ if [ -x "$EXTRACTOR" ]; then
     scp -q /root/lab/stage/sysmon.evtx lab@$REMNUX_IP:${DIR}/sysmon.evtx
     echo -e "    ${GREEN}sysmon.evtx ($(( $(stat -c%s /root/lab/stage/sysmon.evtx)/1024 )) KB) respaldado${NC}"
   else
-    echo -e "    ${RED}[!] EVTX NO extraido. El snapshot forense ${SNAP} se PRESERVA${NC}"
+    echo -e "    ${RED}[!] EVTX NO extraido. El snapshot forense ${SNAP} (creado en el paso 0) se PRESERVA${NC}"
     echo -e "    ${RED}    (no se revertira la victima; exporta el EVTX manualmente antes de continuar)${NC}"
     PRESERVAR_SNAPSHOT=1
   fi
@@ -111,9 +117,7 @@ fi
 # ------------------------------------------------------------
 
 # 7. Snapshot forense (despues de extraer todo)
-echo -e "${CYAN}[7/8] Snapshot forense: ${SNAP}...${NC}"
-qm snapshot $VICTIM "${SNAP}" --description "Infectado: ${CASO}" 2>/dev/null \
-  && echo -e "    ${GREEN}${SNAP} creado${NC}" || echo -e "    ${YELLOW}existe/error${NC}"
+echo -e "${CYAN}[7/8] Snapshot forense ${SNAP} ya creado al inicio (paso 0).${NC}"
 
 # 8. Desmontar ISO, apagar, revertir a golden
 echo -e "${CYAN}[8/8] Desmontando ISO y revirtiendo a golden...${NC}"
@@ -132,6 +136,15 @@ else
     || echo -e "    ${YELLOW}[!] revisar rollback${NC}"
 fi
 
+# CORRECCION (4.1 manifiesto de integridad): generar manifest.sha256 de toda la
+# evidencia recogida, en REMnux, para trazabilidad criptográfica de los artefactos.
+echo -e "${CYAN}[+] Generando manifiesto de integridad (manifest.sha256)...${NC}"
+ssh lab@$REMNUX_IP "cd ${DIR} && sha256sum sysmon_resumen.txt sysmon.evtx mitmdump.log c2_candidatas.txt 2>/dev/null > manifest.sha256; \
+  if [ -d ${PCAPDIR} ]; then (cd ${PCAPDIR} && sha256sum *.log *.pcap* 2>/dev/null) >> ${DIR}/manifest.sha256; fi; \
+  echo '# Caso: ${CASO}' >> manifest.sha256; \
+  echo '# Generado (UTC): $(date -u +%FT%TZ)' >> manifest.sha256; \
+  echo -n '    manifiesto: '; wc -l < manifest.sha256"
+
 echo ""
 echo -e "${GREEN}=== EVIDENCIA RECOGIDA: ${CASO} ===${NC}"
 echo "  ${DIR}/sysmon_resumen.txt   (comportamiento host, ${NLINEAS} eventos)"
@@ -139,4 +152,5 @@ echo "  ${DIR}/sysmon.evtx          (telemetria completa respaldo)"
 echo "  ${DIR}/mitmdump.log         (trafico TLS descifrado)"
 echo "  ${DIR}/c2_candidatas.txt    (posible C2)"
 echo "  ${PCAPDIR}/*.log            (Zeek: conn,dns,http,ssl,ja4)"
+echo "  ${DIR}/manifest.sha256     (integridad SHA-256 de la evidencia)"
 echo -e "${CYAN}Siguiente: ./preparar.sh <sha256> <familia>${NC}"

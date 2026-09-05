@@ -10,7 +10,6 @@ VICTIM=120; REMNUX=110; SINK=100
 GOLDEN="golden-detonacion"
 REMNUX_IP="10.10.20.10"
 SINK_MGMT_IP="10.10.99.2"
-REMNUX_CAP_IF="cap0"
 SAMPLES_REMOTE="/opt/lab/muestras-cifradas"
 STAGE_HOST="/root/stealerlab-final/stage"
 CAPSCRIPT="/root/stealerlab-final/scripts/captura.sh"
@@ -27,11 +26,36 @@ echo -e "${CYAN}=== PREPARANDO: ${FAMILIA} (${SHA:0:16}...) ===${NC}"
 echo -e "${CYAN}Caso: ${CASO}  (timestamps en UTC)${NC}"
 
 echo -e "${CYAN}[1/7] Extrayendo binario con 7z en REMnux...${NC}"
-EXTRACT=$(ssh lab@$REMNUX_IP "rm -rf /tmp/det && mkdir -p /tmp/det && 7z x -y -p${ZIPPASS} ${SAMPLES_REMOTE}/${SHA}.zip -o/tmp/det/ >/dev/null 2>&1 && ls /tmp/det/ | head -1")
-if [ -z "$EXTRACT" ]; then echo -e "    ${RED}[!] Fallo al extraer${NC}"; exit 1; fi
-echo -e "    ${GREEN}extraido: ${EXTRACT}${NC}"
+# Extraer el ZIP (sin seleccionar aun el fichero)
+ssh lab@$REMNUX_IP "rm -rf /tmp/det && mkdir -p /tmp/det && 7z x -y -p${ZIPPASS} ${SAMPLES_REMOTE}/${SHA}.zip -o/tmp/det/ >/dev/null 2>&1"
+
+# CORRECCION (2.1 seleccion determinista): identificar el payload por su SHA-256,
+# no por 'ls | head -1'. Se busca en el contenido extraido el fichero cuyo hash
+# coincide EXACTAMENTE con el SHA solicitado como parametro.
+EXTRACT=$(ssh lab@$REMNUX_IP "cd /tmp/det && for f in \$(find . -type f); do h=\$(sha256sum \"\$f\" | cut -d' ' -f1); if [ \"\$h\" = \"${SHA}\" ]; then basename \"\$f\"; break; fi; done")
+if [ -z "$EXTRACT" ]; then
+  echo -e "    ${RED}[!] Ningun fichero extraido coincide con el SHA-256 solicitado. ABORTANDO.${NC}"
+  echo -e "    ${YELLOW}    Contenido del ZIP:${NC}"
+  ssh lab@$REMNUX_IP "cd /tmp/det && for f in \$(find . -type f); do echo \"      \$(sha256sum \"\$f\")\"; done"
+  exit 1
+fi
+echo -e "    ${GREEN}payload identificado por hash: ${EXTRACT}${NC}"
+
+# CORRECCION (2.2 integridad tras scp): calcular SHA en origen (REMnux) y en destino (host)
+SHA_ORIGEN=$(ssh lab@$REMNUX_IP "sha256sum /tmp/det/${EXTRACT} | cut -d' ' -f1")
 mkdir -p "$STAGE_HOST"
 scp -q lab@${REMNUX_IP}:/tmp/det/${EXTRACT} "${STAGE_HOST}/muestra.exe" 2>/dev/null
+SHA_STAGE=$(sha256sum "${STAGE_HOST}/muestra.exe" | cut -d' ' -f1)
+
+echo -e "    SHA esperado : ${SHA}"
+echo -e "    SHA origen   : ${SHA_ORIGEN}"
+echo -e "    SHA stage    : ${SHA_STAGE}"
+if [ "$SHA" = "$SHA_ORIGEN" ] && [ "$SHA_ORIGEN" = "$SHA_STAGE" ]; then
+  echo -e "    ${GREEN}INTEGRIDAD   : OK (${SHA:0:16}...)${NC}"
+else
+  echo -e "    ${RED}INTEGRIDAD   : FALLO - los hashes no coinciden. ABORTANDO.${NC}"
+  exit 1
+fi
 echo -e "    ${GREEN}binario en host: $(( $(stat -c%s "${STAGE_HOST}/muestra.exe")/1024 )) KB${NC}"
 
 echo -e "${CYAN}[2/7] Revirtiendo victima a ${GOLDEN}...${NC}"
@@ -59,7 +83,7 @@ if [ "$OFFSET" -gt 5 ]; then
   echo -e "    ${YELLOW}Revisa la sincronizacion antes de detonar (rollback puede haber cambiado la fecha).${NC}"
 fi
 
-echo -e "${CYAN}[4/7] Iniciando captura en REMnux (${REMNUX_CAP_IF})...${NC}"
+echo -e "${CYAN}[4/7] Iniciando captura en el sinkhole (ens18)...${NC}"
 RES=$(${CAPSCRIPT} start ${CASO})
 echo "    $RES"
 [[ "$RES" == captura-activa* ]] && echo -e "    ${GREEN}OK${NC}" || echo -e "    ${YELLOW}[!] revisar${NC}"
@@ -89,6 +113,6 @@ echo -e "${GREEN}=== ENTORNO LISTO (relojes UTC correctos) ===${NC}"
 echo -e "${YELLOW}EN LA CONSOLA VNC DE LA VICTIMA:${NC}"
 echo "  1. mkdir C:\\muestra -Force   (si no existe)"
 echo "  2. Copy-Item ${LETRA:-E:}\\muestra.exe C:\\muestra\\muestra.exe"
-echo "  3. Start-Process C:\\muestra\\muestra.exe   y OBSERVA 5-10 min"
+echo "  3. Start-Process C:\\muestra\\muestra.exe   y OBSERVA durante 15 minutos"
 echo "  4. Al terminar, en el host: ./recoger.sh"
 echo -e "Caso: ${CASO}"

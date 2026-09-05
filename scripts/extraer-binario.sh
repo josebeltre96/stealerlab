@@ -1,62 +1,53 @@
 #!/bin/bash
 # ============================================================
-# STEALERLAB - extraer-binario.sh (v3)
-# Extrae un fichero de la VM victima (WINDOWS) por el agente QEMU,
-# troceando el base64 para no exceder el buffer del guest agent.
-#
-# CORRECCION (v3): la victima es Windows 10, por lo que la codificacion
-# se realiza con PowerShell (no con bash/base64/split de Unix, que no
-# existen en Windows). El reensamblado y la decodificacion se hacen en
-# el host Linux.
-#
-# Uso: ./extraer-binario.sh <vmid> <ruta_en_vm_windows> <destino_host>
-#   ej: ./extraer-binario.sh 120 'C:\muestra\muestra.exe' /opt/lab/out/muestra.exe
+# STEALERLAB - extraer-binario.sh (v4)
+# Extraccion de ficheros desde Windows mediante QEMU Guest Agent.
+# La integridad se comprueba comparando SHA-256 en origen y destino.
+# Uso: ./extraer-binario.sh <vmid> <ruta_windows> <destino_host>
 # ============================================================
 set -euo pipefail
-
 VMID="${1:?falta vmid}"; SRC="${2:?falta ruta en la VM}"; DST="${3:?falta destino}"
-GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
-CHUNK_CHARS=350000   # tamano de fragmento en caracteres base64
-
-cleanup(){ qm guest exec "$VMID" -- powershell.exe -Command \
-  "Remove-Item -Force C:\Windows\Temp\_ex.b64 -ErrorAction SilentlyContinue" >/dev/null 2>&1 || true
-  rm -f /tmp/_full.b64 /tmp/_ex.b64 2>/dev/null || true; }
+GREEN='\033[0;32m'; RED='\033[0;31m'; NC='\033[0m'
+CHUNK_CHARS=350000
+TAG="$(date -u +%s%N)"
+B64="C:\\Windows\\Temp\\_stealerlab_${TAG}.b64"
+WORK_B64="/tmp/_stealerlab_${TAG}.b64"
+mkdir -p "$(dirname "$DST")"
+cleanup(){
+  qm guest exec "$VMID" -- powershell.exe -Command "Remove-Item -Force '$B64' -ErrorAction SilentlyContinue" >/dev/null 2>&1 || true
+  rm -f "$WORK_B64"
+}
 trap cleanup EXIT
 
-echo "Extrayendo $SRC de la VM $VMID (Windows, por agente QEMU)..."
+json_out(){ python3 -c "import sys,json; print(json.load(sys.stdin).get('out-data','').strip())"; }
 
-# 1. Codificar a base64 EN LA VICTIMA con PowerShell y guardar en disco
-qm guest exec "$VMID" -- powershell.exe -Command \
-  "[Convert]::ToBase64String([IO.File]::ReadAllBytes('$SRC')) | Set-Content -Path C:\Windows\Temp\_ex.b64 -Encoding ascii" \
-  >/dev/null 2>&1
+echo "Extrayendo $SRC de VM $VMID (Windows, QEMU Guest Agent)..."
+SRC_HASH=$(qm guest exec "$VMID" -- powershell.exe -Command "(Get-FileHash -Algorithm SHA256 -LiteralPath '$SRC').Hash" 2>/dev/null | json_out)
+if ! [[ "$SRC_HASH" =~ ^[A-Fa-f0-9]{64}$ ]]; then echo -e "${RED}[FAIL] No se pudo obtener SHA-256 de origen${NC}"; exit 1; fi
+SRC_HASH="$(echo "$SRC_HASH" | tr '[:upper:]' '[:lower:]')"
+echo "    sha256 origen:  $SRC_HASH"
 
-# 2. Obtener el tamano del base64 para trocear la lectura
-LEN=$(qm guest exec "$VMID" -- powershell.exe -Command \
-  "(Get-Item C:\Windows\Temp\_ex.b64).Length" 2>/dev/null \
-  | python3 -c "import sys,json;print(json.load(sys.stdin).get('out-data','0').strip())")
+qm guest exec "$VMID" -- powershell.exe -Command "[Convert]::ToBase64String([IO.File]::ReadAllBytes('$SRC')) | Set-Content -Path '$B64' -Encoding ascii" >/dev/null 2>&1
+LEN=$(qm guest exec "$VMID" -- powershell.exe -Command "(Get-Item '$B64').Length" 2>/dev/null | json_out)
+[[ "$LEN" =~ ^[0-9]+$ && "$LEN" -gt 0 ]] || { echo -e "${RED}[FAIL] Base64 no generado${NC}"; exit 1; }
 
-if [ -z "$LEN" ] || [ "$LEN" = "0" ]; then
-  echo -e "${RED}[!] No se genero el base64 en la victima (ruta o permisos?)${NC}"; exit 1
-fi
-
-# 3. Leer el base64 por fragmentos (Substring en PowerShell) y concatenar en el host
-> /tmp/_full.b64
+: > "$WORK_B64"
 OFFSET=0
-echo -n "    leyendo ($LEN chars): "
+echo -n "    leyendo ($LEN caracteres): "
 while [ "$OFFSET" -lt "$LEN" ]; do
-  CHUNK=$(qm guest exec "$VMID" -- powershell.exe -Command \
-    "\$c=Get-Content -Raw C:\Windows\Temp\_ex.b64; \$len=[Math]::Min($CHUNK_CHARS, \$c.Length-$OFFSET); \$c.Substring($OFFSET,\$len)" 2>/dev/null \
-    | python3 -c "import sys,json;print(json.load(sys.stdin).get('out-data',''),end='')")
-  printf '%s' "$CHUNK" | tr -d '\r\n' >> /tmp/_full.b64
-  OFFSET=$((OFFSET + CHUNK_CHARS))
-  echo -n "."
+  CHUNK=$(qm guest exec "$VMID" -- powershell.exe -Command "\$c=Get-Content -Raw '$B64'; \$n=[Math]::Min($CHUNK_CHARS, \$c.Length-$OFFSET); \$c.Substring($OFFSET,\$n)" 2>/dev/null | python3 -c "import sys,json;print(json.load(sys.stdin).get('out-data',''),end='')")
+  [ -n "$CHUNK" ] || { echo -e "\n${RED}[FAIL] Fragmento vacio en offset $OFFSET${NC}"; exit 1; }
+  printf '%s' "$CHUNK" | tr -d '\r\n' >> "$WORK_B64"
+  OFFSET=$((OFFSET + CHUNK_CHARS)); echo -n "."
 done
 echo ""
 
-# 4. Decodificar en el host
-if base64 -d /tmp/_full.b64 > "$DST" 2>/dev/null; then
-  echo -e "${GREEN}[OK] $(stat -c%s "$DST") bytes en $DST${NC}"
-  echo -e "    sha256: $(sha256sum "$DST" | cut -d' ' -f1)"
-else
-  echo -e "${RED}[!] Error al decodificar el base64${NC}"; exit 1
+base64 -d "$WORK_B64" > "$DST"
+DST_HASH="$(sha256sum "$DST" | awk '{print $1}')"
+echo "    sha256 destino: $DST_HASH"
+if [ "$SRC_HASH" != "$DST_HASH" ]; then
+  echo -e "${RED}[FAIL] INTEGRIDAD: hash de origen y destino NO coincide${NC}"
+  rm -f "$DST"; exit 1
 fi
+echo -e "${GREEN}[PASS] Integridad verificada: origen == destino${NC}"
+echo -e "    bytes: $(stat -c%s "$DST")"

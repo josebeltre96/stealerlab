@@ -1,123 +1,80 @@
 #!/bin/bash
 #===============================================================================
-# verificar-aislamiento.sh
-# STEALERLAB - Verificacion empirica del aislamiento del segmento de analisis
-# Autor: Jose Arturo Beltre Castro - TFM UEM
-#
-# Ejecutar en el HOST Proxmox. Comprueba los controles de aislamiento del
-# segmento vmbr2 (analisis) y confirma la gestion fuera de banda por agente QEMU.
-# La salida esta pensada para captura de evidencia (Anexo E).
+# STEALERLAB - verificar-aislamiento.sh (v3)
+# Ejecutar en el host Proxmox antes de cada bloque de detonaciones.
+# Comprueba: ausencia de IP/ruta en vmbr2, forwarding L3 desactivado,
+# evidencia de filtrado nftables IPv4/IPv6, estructura L2 y prueba efectiva
+# desde la victima hacia gestion.
 #===============================================================================
-
-# --- Parametros del laboratorio (ajustar si cambia el direccionamiento) ---
-SINKHOLE_IP="10.10.66.2"     # sinkhole en el segmento de analisis
-VICTIMA_IP="10.10.66.10"     # victima en el segmento de analisis
-MGMT_IP="10.10.99.1"         # gateway de gestion (vmbr3)
-VMID_VICTIM="120"
+set -uo pipefail
+VMBR2="vmbr2"; SEG_ANALISIS="10.10.66.0/24"; SINKHOLE_IP="10.10.66.2"
+VMID_VICTIM="120"; MGMT_IP="10.10.99.1"
 FALLOS=0
-SEG_ANALISIS="10.10.66.0/24"
-VMID_SINKHOLE="100"          # VM100 = sinkhole (para prueba de agente QEMU)
-
-# --- Colores ---
 V='\033[0;32m'; R='\033[0;31m'; A='\033[1;34m'; N='\033[0m'; B='\033[1m'
-ok(){   echo -e "  [${V}OK${N}]   $1"; }
+ok(){ echo -e "  [${V}OK${N}]   $1"; }
 fail(){ echo -e "  [${R}FALLO${N}] $1"; FALLOS=$((FALLOS+1)); }
 info(){ echo -e "  [${A}INFO${N}] $1"; }
 
+command -v ip >/dev/null || { echo '[FAIL] falta ip'; exit 1; }
+command -v qm >/dev/null || { echo '[FAIL] no se ejecuta en Proxmox'; exit 1; }
+
 echo -e "${B}===============================================================${N}"
-echo -e "${B} STEALERLAB - Verificacion de aislamiento del segmento vmbr2${N}"
-echo -e "${B} Host: $(hostname)   Fecha (UTC): $(date -u '+%Y-%m-%d %H:%M:%S')${N}"
+echo -e "${B} STEALERLAB - Verificacion empirica de aislamiento${N}"
+echo -e "${B} Host: $(hostname) | UTC: $(date -u '+%Y-%m-%d %H:%M:%S.%3N')${N}"
 echo -e "${B}===============================================================${N}"
 
-#-------------------------------------------------------------------------------
-echo -e "\n${A}[1] Control primario: el host NO tiene IP en vmbr2${N}"
-#-------------------------------------------------------------------------------
-VMBR2_IP=$(ip -4 -br addr show vmbr2 2>/dev/null | awk '{print $3}')
-ip -br addr show vmbr2 2>/dev/null || echo "  (vmbr2 no existe)"
-if [ -z "$VMBR2_IP" ]; then
-  ok "vmbr2 sin direccion IPv4 en el host (no hay ruta posible al segmento)"
+echo -e "\n${A}[1] vmbr2 sin direccion IPv4/IPv6 en el host${N}"
+V4=$(ip -4 addr show dev "$VMBR2" 2>/dev/null | awk '/inet /{print $2}')
+V6=$(ip -6 addr show dev "$VMBR2" 2>/dev/null | awk '/inet6 /{print $2}')
+[ -z "$V4" ] && [ -z "$V6" ] && ok "$VMBR2 sin direcciones L3 en el host" || fail "$VMBR2 tiene direccion(es): IPv4=[$V4] IPv6=[$V6]"
+
+echo -e "\n${A}[2] Sin ruta L3 directa al segmento de analisis${N}"
+RUTA=$(ip route show "$SEG_ANALISIS" 2>/dev/null || true)
+[ -z "$RUTA" ] && ok "Sin ruta IPv4 especifica a $SEG_ANALISIS" || fail "Existe ruta IPv4: $RUTA"
+RUTA6=$(ip -6 route show 2>/dev/null | grep -F '10.10.66.' || true)
+[ -z "$RUTA6" ] || fail "Existe ruta IPv6 relacionada con 10.10.66: $RUTA6"
+
+echo -e "\n${A}[3] Forwarding L3 del host desactivado${N}"
+IPF=$(sysctl -n net.ipv4.ip_forward 2>/dev/null || echo unknown)
+IP6F=$(sysctl -n net.ipv6.conf.all.forwarding 2>/dev/null || echo unknown)
+[ "$IPF" = "0" ] && ok "net.ipv4.ip_forward=0" || fail "net.ipv4.ip_forward=$IPF (debe ser 0 en este diseño)"
+[ "$IP6F" = "0" ] && ok "net.ipv6.conf.all.forwarding=0" || fail "net.ipv6.conf.all.forwarding=$IP6F (debe ser 0 en este diseño)"
+
+echo -e "\n${A}[4] nftables: defensa de forwarding y ausencia de NAT hacia vmbr2${N}"
+if command -v nft >/dev/null 2>&1; then
+  NFT=$(nft list ruleset 2>/dev/null || true)
+  echo "$NFT" | grep -Fq 'vmbr2' && ok 'El ruleset nftables referencia vmbr2' || fail 'nftables no muestra referencia a vmbr2'
+  echo "$NFT" | grep -Eiq '\b(drop|reject)\b' && ok 'El ruleset contiene drop/reject' || fail 'No se observa drop/reject en nftables'
+  if echo "$NFT" | grep -Eiq 'vmbr2.*(snat|masquerade|dnat)|((snat|masquerade|dnat).*vmbr2)'; then
+    fail 'Se observa NAT asociado a vmbr2; revisar inmediatamente'
+  else
+    ok 'No se observa NAT asociado textualmente a vmbr2'
+  fi
 else
-  fail "vmbr2 tiene IP $VMBR2_IP en el host -- revisar, rompe el aislamiento primario"
+  fail 'nft no disponible; no se puede verificar el firewall del diseño'
 fi
 
-#-------------------------------------------------------------------------------
-echo -e "\n${A}[2] El host no tiene ruta hacia el segmento de analisis${N}"
-#-------------------------------------------------------------------------------
-RUTA=$(ip route | grep "$SEG_ANALISIS")
-if [ -z "$RUTA" ]; then
-  ok "Sin ruta a $SEG_ANALISIS en la tabla de enrutamiento del host"
-else
-  fail "Existe ruta a $SEG_ANALISIS: $RUTA"
+echo -e "\n${A}[5] Estructura L2 de vmbr2${N}"
+ip -br link show "$VMBR2" 2>/dev/null | sed 's/^/  /'
+if command -v bridge >/dev/null 2>&1; then
+  bridge link show 2>/dev/null | grep -F "$VMBR2" | sed 's/^/  /' || true
 fi
+info 'La ausencia de puerto fisico se documenta aqui; no implica por si sola aislamiento L3/L2 completo.'
 
-#-------------------------------------------------------------------------------
-echo -e "\n${A}[3] El host NO alcanza el segmento de analisis (debe fallar)${N}"
-#-------------------------------------------------------------------------------
-if ping -c 2 -W 2 "$SINKHOLE_IP" >/dev/null 2>&1; then
-  fail "El host alcanza $SINKHOLE_IP -- NO deberia (revisar aislamiento)"
-else
-  ok "El host no alcanza $SINKHOLE_IP (100% perdida) -- aislamiento correcto"
-fi
+echo -e "\n${A}[6] Prueba efectiva: host -> sinkhole (debe FALLAR)${N}"
+if ping -c 2 -W 2 "$SINKHOLE_IP" >/dev/null 2>&1; then fail "El host alcanza $SINKHOLE_IP"; else ok "El host no alcanza $SINKHOLE_IP"; fi
 
-#-------------------------------------------------------------------------------
-echo -e "\n${A}[4] Defensa en profundidad: reglas FORWARD DROP sobre vmbr2${N}"
-#-------------------------------------------------------------------------------
-echo "  --- iptables -L FORWARD (primeras reglas) ---"
-iptables -L FORWARD -n -v --line-numbers 2>/dev/null | head -6 | sed 's/^/  /'
-DROPS=$(iptables -L FORWARD -n 2>/dev/null | grep -c "DROP")
-if [ "$DROPS" -ge 2 ]; then
-  ok "Se encuentran reglas DROP asociadas a vmbr2 (defensa en profundidad activa)"
-else
-  info "Revisar manualmente las reglas DROP sobre vmbr2"
-fi
-
-#-------------------------------------------------------------------------------
-echo -e "\n${A}[5] Gestion fuera de banda: agente QEMU de la VM aislada${N}"
-#-------------------------------------------------------------------------------
-if qm agent "$VMID_SINKHOLE" ping >/dev/null 2>&1; then
-  ok "Agente QEMU de la VM$VMID_SINKHOLE responde (gestion operativa sin red)"
-else
-  info "El agente QEMU de la VM$VMID_SINKHOLE no responde (verificar que la VM este activa)"
-fi
-
-#-------------------------------------------------------------------------------
-echo -e "\n${A}[6] Puentes de red sin puerto fisico (aislamiento L2)${N}"
-#-------------------------------------------------------------------------------
-echo "  --- brctl show (resumen) ---"
-if command -v brctl >/dev/null 2>&1; then
-  brctl show 2>/dev/null | sed 's/^/  /'
-else
-  ip -br link show type bridge 2>/dev/null | sed 's/^/  /'
-fi
-
-#-------------------------------------------------------------------------------
-echo -e "\n${A}[7] Prueba CRITICA: victima -> gestion (debe FALLAR)${N}"
-# Este es el camino que provoco el cuasi-incidente (seccion 5.7): la victima
-# NO debe alcanzar el segmento de gestion. Se lanza desde DENTRO de la victima.
-#-------------------------------------------------------------------------------
-RES=$(qm guest exec "$VMID_VICTIM" -- powershell.exe -Command \
-  "(Test-Connection -ComputerName $MGMT_IP -Count 2 -Quiet)" 2>/dev/null \
-  | python3 -c "import sys,json;print(json.load(sys.stdin).get('out-data','').strip())" 2>/dev/null || echo "error")
-if echo "$RES" | grep -qi "true"; then
-  fail "La victima ALCANZA la gestion ($MGMT_IP) -- FUGA DE AISLAMIENTO CRITICA"
-else
-  ok "La victima NO alcanza la gestion ($MGMT_IP) -- aislamiento correcto"
-fi
+echo -e "\n${A}[7] Prueba critica: victima -> gestion (debe FALLAR)${N}"
+RES=$(qm guest exec "$VMID_VICTIM" -- powershell.exe -Command "(Test-Connection -ComputerName '$MGMT_IP' -Count 2 -Quiet)" 2>/dev/null | python3 -c "import sys,json;print(json.load(sys.stdin).get('out-data','').strip())" 2>/dev/null || echo error)
+case "$(echo "$RES" | tr -d '\r\n ' | tr '[:upper:]' '[:lower:]')" in
+  true) fail "La victima alcanza gestion $MGMT_IP -- FUGA CRITICA";;
+  false) ok "La victima no alcanza gestion $MGMT_IP";;
+  *) fail "No se pudo determinar resultado de la prueba desde la victima: [$RES]";;
+esac
 
 echo -e "\n${B}===============================================================${N}"
-echo -e "${B} Resumen: el segmento de analisis es inalcanzable por red desde${N}"
-echo -e "${B} el host, pero la VM sigue siendo gestionable por el agente QEMU.${N}"
-echo -e "${B} Esta es la evidencia central del aislamiento (Cap. 5.2 y 5.7).${N}"
-echo -e "${B}===============================================================${N}"
-
-#-------------------------------------------------------------------------------
-# Resultado global (aserciones PASS/FAIL, bug #43)
-#-------------------------------------------------------------------------------
-echo ""
 if [ "$FALLOS" -eq 0 ]; then
-  echo -e "${V}[PASS] Todos los controles de aislamiento superados.${N}"
-  exit 0
+  echo -e "${V}[PASS] Controles de aislamiento superados. Se puede detonar.${N}"; exit 0
 else
-  echo -e "${R}[FAIL] $FALLOS control(es) de aislamiento fallaron. NO detonar.${N}"
-  exit 1
+  echo -e "${R}[FAIL] $FALLOS control(es) fallaron. NO detonar.${N}"; exit 1
 fi

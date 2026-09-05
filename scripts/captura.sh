@@ -1,27 +1,32 @@
 #!/bin/bash
-# STEALERLAB - captura.sh (v5) - captura en el sinkhole (ens18), donde converge el trafico.
-# El proceso tcpdump corre en primer plano DENTRO del sinkhole; el host mantiene
-# la sesion SSH en background LOCAL (fiable) y guarda su PID para detenerla.
-set -uo pipefail
+# ============================================================
+# STEALERLAB - captura.sh (v6)
+# Captura directamente en el sinkhole, sobre ens18, donde converge
+# el trafico del segmento 10.10.66.0/24.
+# Uso: ./captura.sh {start|stop} <caso>
+# ============================================================
+set -euo pipefail
 ACTION="${1:?falta accion}"; CASO="${2:?falta caso}"
-SINK_MGMT="10.10.99.2"; OUTDIR="/opt/lab/pcap/${CASO}"
-SSHPID="/tmp/cap_ssh_${CASO}.pid"
-GREEN='\033[0;32m'; NC='\033[0m'
+SINK_MGMT="10.10.99.2"
+OUTDIR="/opt/lab/pcap/${CASO}"
+REMOTE_PID="/tmp/stealerlab_tcpdump_${CASO}.pid"
+GREEN='\033[0;32m'; RED='\033[0;31m'; NC='\033[0m'
+SSH=(ssh -o BatchMode=yes -o StrictHostKeyChecking=no "lab@${SINK_MGMT}")
+
 case "$ACTION" in
   start)
-    ssh -o StrictHostKeyChecking=no lab@$SINK_MGMT "sudo mkdir -p $OUTDIR" 2>/dev/null
-    # SSH en background LOCAL del host, tcpdump en primer plano dentro del sinkhole
-    ssh -o StrictHostKeyChecking=no lab@$SINK_MGMT \
-      "sudo tcpdump -i ens18 -n -s0 -C 100 -W 10 -w ${OUTDIR}/captura.pcap 'net 10.10.66.0/24'" \
-      >/dev/null 2>&1 &
-    echo $! > "$SSHPID"
+    "${SSH[@]}" "sudo mkdir -p '$OUTDIR'; sudo rm -f '$REMOTE_PID'; sudo nohup tcpdump -i ens18 -n -s0 -C 100 -W 10 -w '$OUTDIR/captura.pcap' 'net 10.10.66.0/24' >/dev/null 2>&1 & echo \$! | sudo tee '$REMOTE_PID' >/dev/null"
     sleep 2
-    echo -e "${GREEN}    captura-activa en sinkhole ens18 (${CASO})${NC}"
+    if "${SSH[@]}" "test -s '$REMOTE_PID' && sudo kill -0 \$(cat '$REMOTE_PID')" >/dev/null 2>&1; then
+      echo -e "${GREEN}    captura-activa en sinkhole ens18 (${CASO})${NC}"
+    else
+      echo -e "${RED}    [FAIL] tcpdump no quedo activo${NC}"; exit 1
+    fi
     ;;
   stop)
-    # Detener tcpdump en el sinkhole y cerrar la sesion SSH local
-    ssh -o StrictHostKeyChecking=no lab@$SINK_MGMT "sudo pkill -f 'tcpdump.*${CASO}'" 2>/dev/null || true
-    [ -f "$SSHPID" ] && kill "$(cat "$SSHPID")" 2>/dev/null; rm -f "$SSHPID"
-    echo -e "${GREEN}    captura-detenida${NC}"
+    "${SSH[@]}" "if test -s '$REMOTE_PID'; then sudo kill \$(cat '$REMOTE_PID') 2>/dev/null || true; rm -f '$REMOTE_PID'; fi" || true
+    sleep 1
+    echo -e "${GREEN}    captura-detenida (${CASO})${NC}"
     ;;
+  *) echo "Uso: $0 {start|stop} <caso>"; exit 2 ;;
 esac

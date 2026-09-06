@@ -97,12 +97,23 @@ qm guest exec $VICTIM -- powershell.exe -Command \
 # RED
 # ------------------------------------------------------------
 
-# 5. Detener captura y procesar con Zeek (en dir escribible por lab)
+# 5. Detener captura y procesar con Zeek
+# CORRECCION: el pcap se captura en el SINKHOLE (no en REMnux). Se trae del sinkhole,
+# se procesa con Zeek en REMnux, y un fallo de Zeek NO debe abortar el script (el pcap
+# ya esta preservado). Se envuelve en subshell con "|| true" para tolerar errores.
 echo -e "${CYAN}[5/8] Deteniendo captura y procesando con Zeek...${NC}"
-${CAPSCRIPT} stop ${CASO} 2>/dev/null
-PSIZE=$(ssh lab@$REMNUX_IP "stat -c%s ${PCAPDIR}/captura.pcap 2>/dev/null || echo 0")
+${CAPSCRIPT} stop ${CASO} 2>/dev/null || true
+# El pcap esta en el sinkhole; medir su tamaño alli
+PSIZE=$(ssh -o StrictHostKeyChecking=no lab@$SINK_MGMT_IP "sudo stat -c%s ${PCAPDIR}/captura.pcap 2>/dev/null || echo 0" 2>/dev/null || echo 0)
 if [ "${PSIZE:-0}" -gt 24 ]; then
-  ssh lab@$REMNUX_IP "rm -rf /tmp/zk-${CASO} && mkdir -p /tmp/zk-${CASO} && cd /tmp/zk-${CASO} && ${ZEEK} -C -r ${PCAPDIR}/captura.pcap 2>/dev/null; sudo cp /tmp/zk-${CASO}/*.log ${PCAPDIR}/ 2>/dev/null; echo -n '    logs Zeek: '; ls ${PCAPDIR}/*.log 2>/dev/null | xargs -n1 basename | tr '\n' ' '; echo"
+  # Traer el pcap del sinkhole al destino (REMnux) para conservarlo con el resto de evidencia
+  ssh -o StrictHostKeyChecking=no lab@$SINK_MGMT_IP "sudo chmod +r ${PCAPDIR}/captura.pcap 2>/dev/null" 2>/dev/null || true
+  scp -q lab@$SINK_MGMT_IP:${PCAPDIR}/captura.pcap /root/lab/stage/captura.pcap 2>/dev/null || true
+  ssh lab@$REMNUX_IP "mkdir -p ${PCAPDIR}" 2>/dev/null || true
+  scp -q /root/lab/stage/captura.pcap lab@$REMNUX_IP:${PCAPDIR}/captura.pcap 2>/dev/null || true
+  echo -e "    ${GREEN}pcap recuperado del sinkhole (${PSIZE} bytes)${NC}"
+  # Procesar con Zeek en REMnux (tolerante a fallos: no aborta el recoger)
+  ssh lab@$REMNUX_IP "rm -rf /tmp/zk-${CASO} && mkdir -p /tmp/zk-${CASO} && cd /tmp/zk-${CASO} && ${ZEEK} -C -r ${PCAPDIR}/captura.pcap 2>/dev/null; cp /tmp/zk-${CASO}/*.log ${PCAPDIR}/ 2>/dev/null; echo -n '    logs Zeek: '; ls ${PCAPDIR}/*.log 2>/dev/null | xargs -n1 basename 2>/dev/null | tr '\n' ' '; echo" 2>/dev/null || echo -e "    ${YELLOW}[!] Zeek fallo o sin logs (el pcap se conserva igual)${NC}"
 else
   echo -e "    ${YELLOW}[!] PCAP sin datos (${PSIZE} bytes) - evidencia de red via mitmdump${NC}"
 fi
@@ -163,3 +174,4 @@ echo "  ${DIR}/c2_candidatas.txt    (posible C2)"
 echo "  ${PCAPDIR}/*.log            (Zeek: conn,dns,http,ssl,ja4)"
 echo "  ${DIR}/manifest.sha256     (integridad SHA-256 de la evidencia)"
 echo -e "${CYAN}Siguiente: ./preparar.sh <sha256> <familia>${NC}"
+

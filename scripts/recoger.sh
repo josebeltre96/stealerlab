@@ -125,7 +125,7 @@ if [ "${LSIZE:-0}" -gt 0 ]; then
   scp -q lab@$SINK_MGMT_IP:/var/log/mitm/mitmdump.log /root/lab/stage/mitmdump.log
   scp -q /root/lab/stage/mitmdump.log lab@$REMNUX_IP:${DIR}/mitmdump.log
   echo -e "    ${GREEN}mitmdump.log (${LSIZE} bytes)${NC}"
-  ssh lab@$REMNUX_IP "grep -iE 'GET |POST |CONNECT |HEAD ' ${DIR}/mitmdump.log | grep -viE 'msftconnecttest|microsoft|skype|windows|msedge|bing|digicert|verisign|windowsupdate' > ${DIR}/c2_candidatas.txt 2>/dev/null; echo -n '    peticiones no-Windows (posible C2): '; wc -l < ${DIR}/c2_candidatas.txt"
+  ssh lab@$REMNUX_IP "grep -E '(GET|POST|CONNECT|HEAD|PUT|PATCH) https?://' ${DIR}/mitmdump.log | grep -viE 'msftconnecttest|microsoft|skype|windows|msedge|bing|digicert|verisign|windowsupdate|azureedge|live.com|office' > ${DIR}/c2_candidatas.txt 2>/dev/null; echo -n '    peticiones HTTP no-Windows (posible C2): '; wc -l < ${DIR}/c2_candidatas.txt"
   echo -n "    C2 unicos: "
   ssh lab@$REMNUX_IP "grep -oE '(GET|POST|CONNECT|HEAD) https?://[^/: ]+' ${DIR}/c2_candidatas.txt 2>/dev/null | awk '{print \$2}' | sort -u | tr '\n' ' '"; echo
 else
@@ -174,4 +174,3 @@ echo "  ${DIR}/c2_candidatas.txt    (posible C2)"
 echo "  ${PCAPDIR}/*.log            (Zeek: conn,dns,http,ssl,ja4)"
 echo "  ${DIR}/manifest.sha256     (integridad SHA-256 de la evidencia)"
 echo -e "${CYAN}Siguiente: ./preparar.sh <sha256> <familia>${NC}"
-

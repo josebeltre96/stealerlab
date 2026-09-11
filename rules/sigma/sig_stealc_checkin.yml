@@ -18,7 +18,6 @@ detection:
     selection:
         QueryName|contains:
             - 'svhost-update-service'
-            - 'svhost'
     condition: selection
 falsepositives:
     - Improbable; ningun servicio legitimo usa el typosquat 'svhost'.

@@ -1,0 +1,29 @@
+title: RedLine - intento de conexion al C2 por IP directa
+id: 519378cb-2deb-498e-9155-0099ee16a24d
+status: experimental
+description: Detecta el intento de conexion a la infraestructura de C2 de RedLine identificada (IP 85.17.151.21 o puerto 55615), sin resolucion DNS previa, por un proceso no navegador. Observado como rechazado en el laboratorio; su valor es de deteccion temprana del intento de contacto, no de confirmacion de comunicacion establecida. El puerto 55615 coincide con infraestructura de RedLine documentada por inteligencia publica.
+author: J. A. Beltre Castro
+date: 2026/09/08
+references:
+    - TFM STEALERLAB
+tags:
+    - attack.command_and_control
+    - attack.t1071
+logsource:
+    category: network_connection
+    product: windows
+detection:
+    selection_ip:
+        DestinationIp: '85.17.151.21'
+    selection_port:
+        DestinationPort: 55615
+    filter_browser:
+        Image|endswith:
+            - '\chrome.exe'
+            - '\firefox.exe'
+            - '\msedge.exe'
+            - '\brave.exe'
+    condition: (selection_ip or selection_port) and not filter_browser
+falsepositives:
+    - La IP puede reasignarse con el tiempo; el puerto 55615 puede aparecer en trafico legitimo. Correlacionar con proceso, ausencia de DNS previa y ventana temporal.
+level: medium

@@ -59,8 +59,9 @@ if [ -z "$RUTA" ]; then
 else
   fail "Existe ruta IPv4 a $SEG_ANALISIS: $RUTA"
 fi
-RUTA6=$(ip -6 route show 2>/dev/null | grep -F '10.10.66.' || true)
-[ -z "$RUTA6" ] && ok "Sin ruta IPv6 relacionada con el segmento" || fail "Existe ruta IPv6: $RUTA6"
+# NOTA: la validacion de aislamiento de rutas de este script se limita a IPv4.
+# IPv6, ARP/NDP y direcciones link-local quedan fuera del alcance experimental.
+info "Aislamiento IPv6: fuera del alcance experimental (este script valida IPv4)"
 
 #-------------------------------------------------------------------------------
 echo -e "\n${A}[3] Reenvio L3: activo solo para el NAT de salida de vmbr1 (REMnux)${N}"

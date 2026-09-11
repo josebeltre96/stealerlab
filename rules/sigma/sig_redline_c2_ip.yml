@@ -23,7 +23,7 @@ detection:
             - '\firefox.exe'
             - '\msedge.exe'
             - '\brave.exe'
-    condition: (selection_ip or selection_port) and not filter_browser
+    condition: (selection_ip and selection_port) and not filter_browser
 falsepositives:
     - La IP puede reasignarse con el tiempo; el puerto 55615 puede aparecer en trafico legitimo. Correlacionar con proceso, ausencia de DNS previa y ventana temporal.
 level: medium
